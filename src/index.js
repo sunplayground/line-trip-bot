@@ -1,4 +1,4 @@
-import { getBotInfo, pushMessage, showLoading } from "./line.js";
+import { getBotInfo, pushMessage, replyMessage, showLoading } from "./line.js";
 import { chatCompletion } from "./openrouter.js";
 
 export default {
@@ -152,10 +152,20 @@ async function handleEvent(event, env) {
   }
 
   const truncated = maybeTruncate(response, 5000);
-  const debugLine = "\n\n_[via push API]_";
-  const finalMessage = truncated + debugLine;
-  const sent = await pushMessage(groupId, finalMessage, env.LINE_CHANNEL_ACCESS_TOKEN);
-  console.log("Push result:", sent);
+  const replyToken = event.replyToken;
+  let sentVia = "push API";
+  let sent = false;
+
+  if (replyToken) {
+    sent = await replyMessage(replyToken, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
+    if (sent) sentVia = "reply token";
+  }
+
+  if (!sent) {
+    sent = await pushMessage(groupId, `${truncated}\n\n_[via ${sentVia}]_`, env.LINE_CHANNEL_ACCESS_TOKEN);
+  }
+
+  console.log(`Sent via ${sentVia}, result: ${sent}`);
 }
 
 function stripMentions(text, mention) {
