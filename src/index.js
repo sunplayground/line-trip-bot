@@ -54,34 +54,35 @@ export default {
     const payload = JSON.parse(body);
     const events = payload.events || [];
 
-    const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
-    const encoder = new TextEncoder();
-
-    writer.write(encoder.encode("OK"));
-
-    const keepalive = setInterval(() => {
-      writer.write(encoder.encode(" ")).catch(() => {});
-    }, 10000);
-
-    const processing = (async () => {
-      try {
-        for (const event of events) {
-          try {
-            await handleEvent(event, env);
-          } catch (err) {
-            console.error("Event error:", err);
-          }
-        }
-      } finally {
-        clearInterval(keepalive);
-        try { await writer.close(); } catch (e) {}
+    for (const event of events) {
+      if (event.type === "join" && event.source?.groupId) {
+        ctx.waitUntil(
+          pushMessage(
+            event.source.groupId,
+            "👋 Hi! I'm TripSplit Bot.\n\nTag me to track trip expenses!",
+            env.LINE_CHANNEL_ACCESS_TOKEN
+          )
+        );
+        continue;
       }
-    })();
 
-    ctx.waitUntil(processing);
+      ctx.waitUntil(env.EVENT_QUEUE.send(event));
+    }
 
-    return new Response(readable, { status: 200 });
+    return new Response("OK", { status: 200 });
+  },
+
+  async queue(batch, env) {
+    for (const message of batch.messages) {
+      try {
+        console.log("Processing queue message:", JSON.stringify(message.body).substring(0, 200));
+        await handleEvent(message.body, env);
+        message.ack();
+      } catch (err) {
+        console.error("Queue processing error:", err);
+        message.retry();
+      }
+    }
   },
 };
 
@@ -102,17 +103,6 @@ async function verifySignature(body, signature, secret) {
 
 async function handleEvent(event, env) {
   const { type, source } = event;
-
-  if (type === "join" && source?.groupId) {
-    const welcome =
-      "👋 Hi! I'm TripSplit Bot.\n\n" +
-      "Tag me to track trip expenses — e.g.:\n" +
-      '"@bot Alice paid 500 for dinner"\n\n' +
-      'Ask me to "settle" or "สรุป" when the trip is done to calculate who owes whom.\n' +
-      'Type "help" for more.';
-    await pushMessage(source.groupId, welcome, env.LINE_CHANNEL_ACCESS_TOKEN);
-    return;
-  }
 
   if (type !== "message" || event.message?.type !== "text") return;
 
@@ -144,11 +134,13 @@ async function handleEvent(event, env) {
 
   let response;
   try {
+    console.log("Calling OpenRouter...");
     response = await chatCompletion(
       [{ role: "user", content: userText }],
       env.OPENROUTER_API_KEY,
       env.MODEL || "google/gemini-3.1-pro-preview"
     );
+    console.log("OpenRouter response:", response?.substring(0, 200));
   } catch (err) {
     console.error("LLM call failed:", err);
     response =
@@ -156,7 +148,8 @@ async function handleEvent(event, env) {
   }
 
   const truncated = maybeTruncate(response, 5000);
-  await pushMessage(groupId, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
+  const sent = await pushMessage(groupId, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
+  console.log("Push result:", sent);
 }
 
 function stripMentions(text, mention) {
