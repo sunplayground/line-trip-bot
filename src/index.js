@@ -1,4 +1,4 @@
-import { getBotInfo, replyMessage, pushMessage } from "./line.js";
+import { getBotInfo, pushMessage } from "./line.js";
 import { chatCompletion } from "./openrouter.js";
 
 export default {
@@ -19,7 +19,13 @@ export default {
     const payload = JSON.parse(body);
     const events = payload.events || [];
 
-    ctx.waitUntil(handleEvents(events, env));
+    for (const event of events) {
+      try {
+        await handleEvent(event, env);
+      } catch (err) {
+        console.error("Event handling error:", err);
+      }
+    }
 
     return new Response("OK", { status: 200 });
   },
@@ -86,12 +92,7 @@ async function handleEvent(event, env) {
   const userText = stripMentions(event.message.text, mention);
 
   if (/^(reset|เริ่มใหม่)$/i.test(userText.trim())) {
-    await replyWithFallback(
-      event.replyToken,
-      groupId,
-      "✅ Ledger cleared! Start tracking a new trip!",
-      env
-    );
+    await pushMessage(groupId, "✅ Ledger cleared! Start tracking a new trip!", env.LINE_CHANNEL_ACCESS_TOKEN);
     return;
   }
 
@@ -109,14 +110,7 @@ async function handleEvent(event, env) {
   }
 
   const truncated = maybeTruncate(response, 5000);
-  await replyWithFallback(event.replyToken, groupId, truncated, env);
-}
-
-async function replyWithFallback(replyToken, groupId, message, env) {
-  const sent = await replyMessage(replyToken, message, env.LINE_CHANNEL_ACCESS_TOKEN);
-  if (!sent) {
-    await pushMessage(groupId, message, env.LINE_CHANNEL_ACCESS_TOKEN);
-  }
+  await pushMessage(groupId, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
 }
 
 function stripMentions(text, mention) {
