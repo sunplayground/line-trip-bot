@@ -21,11 +21,9 @@ export default {
           },
           body: JSON.stringify({
             model: env.MODEL || "google/gemini-3.1-pro-preview",
-            messages: [
-              { role: "user", content: prompt },
-            ],
-            max_tokens: 4000,
-            temperature: 0.7,
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: 8000,
+            temperature: 0.3,
           }),
         });
         results.status = res.status;
@@ -33,7 +31,6 @@ export default {
         results.finish_reason = data.choices?.[0]?.finish_reason;
         results.usage = data.usage;
         results.content = data.choices?.[0]?.message?.content;
-        results.reasoning = data.choices?.[0]?.message?.reasoning;
       } catch (err) {
         results.error = err.message;
       }
@@ -50,33 +47,46 @@ export default {
     const body = await request.text();
     const signature = request.headers.get("X-Line-Signature");
 
-    console.log("Webhook received:", { path: url.pathname, hasSignature: !!signature, bodyLen: body.length });
-
     if (!signature || !(await verifySignature(body, signature, env.LINE_CHANNEL_SECRET))) {
-      console.log("Signature verification failed");
       return new Response("Unauthorized", { status: 401 });
     }
 
-    console.log("Signature verified OK");
-
     const payload = JSON.parse(body);
     const events = payload.events || [];
-    console.log(`Processing ${events.length} event(s)`);
-    console.log("Events:", JSON.stringify(events).substring(0, 1000));
 
-    for (const event of events) {
-      ctx.waitUntil(handleEvent(event, env).catch((err) => console.error("Event handling error:", err)));
-    }
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
 
-    return new Response("OK", { status: 200 });
+    writer.write(encoder.encode("OK"));
+
+    const keepalive = setInterval(() => {
+      writer.write(encoder.encode(" ")).catch(() => {});
+    }, 10000);
+
+    const processing = (async () => {
+      try {
+        for (const event of events) {
+          try {
+            await handleEvent(event, env);
+          } catch (err) {
+            console.error("Event error:", err);
+          }
+        }
+      } finally {
+        clearInterval(keepalive);
+        try { await writer.close(); } catch (e) {}
+      }
+    })();
+
+    ctx.waitUntil(processing);
+
+    return new Response(readable, { status: 200 });
   },
 };
 
 async function verifySignature(body, signature, secret) {
-  if (!secret) {
-    console.log("No secret configured");
-    return false;
-  }
+  if (!secret) return false;
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
@@ -87,14 +97,11 @@ async function verifySignature(body, signature, secret) {
   );
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
   const expected = btoa(String.fromCharCode(...new Uint8Array(sig)));
-  const match = expected === signature;
-  console.log("Signature compare:", { expected: expected?.substring(0, 10), got: signature?.substring(0, 10), match });
-  return match;
+  return expected === signature;
 }
 
 async function handleEvent(event, env) {
   const { type, source } = event;
-  console.log("Handling event:", type, "source:", JSON.stringify(source));
 
   if (type === "join" && source?.groupId) {
     const welcome =
@@ -107,46 +114,28 @@ async function handleEvent(event, env) {
     return;
   }
 
-  if (type !== "message" || event.message?.type !== "text") {
-    console.log("Skipping event: not a text message");
-    return;
-  }
+  if (type !== "message" || event.message?.type !== "text") return;
 
   const groupId = source?.groupId;
-  if (!groupId) {
-    console.log("Skipping: no groupId (not a group chat)");
-    return;
-  }
-
-  console.log("Message text:", event.message.text);
-  console.log("Mention data:", JSON.stringify(event.message.mention));
+  if (!groupId) return;
 
   const mention = event.message.mention;
-  if (!mention?.mentionees?.length) {
-    console.log("Skipping: no mentions");
-    return;
-  }
+  if (!mention?.mentionees?.length) return;
 
   let botInfo;
   try {
     botInfo = await getBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
-    console.log("Bot userId:", botInfo.userId);
   } catch (err) {
     console.error("Failed to get bot info:", err);
     return;
   }
 
-  console.log("Mentionees:", JSON.stringify(mention.mentionees));
   const isMentioned = mention.mentionees.some((m) => m.userId === botInfo.userId);
-  console.log("Is bot mentioned:", isMentioned);
   if (!isMentioned) return;
 
   const userText = stripMentions(event.message.text, mention);
-  console.log("Stripped text:", userText);
 
-  await showLoading(groupId, env.LINE_CHANNEL_ACCESS_TOKEN).catch((e) =>
-    console.log("showLoading failed (non-fatal):", e.message)
-  );
+  await showLoading(groupId, env.LINE_CHANNEL_ACCESS_TOKEN).catch(() => {});
 
   if (/^(reset|เริ่มใหม่)$/i.test(userText.trim())) {
     await pushMessage(groupId, "✅ Ledger cleared! Start tracking a new trip!", env.LINE_CHANNEL_ACCESS_TOKEN);
@@ -155,13 +144,11 @@ async function handleEvent(event, env) {
 
   let response;
   try {
-    console.log("Calling OpenRouter...");
     response = await chatCompletion(
       [{ role: "user", content: userText }],
       env.OPENROUTER_API_KEY,
       env.MODEL || "google/gemini-3.1-pro-preview"
     );
-    console.log("OpenRouter response:", response?.substring(0, 200));
   } catch (err) {
     console.error("LLM call failed:", err);
     response =
@@ -169,9 +156,7 @@ async function handleEvent(event, env) {
   }
 
   const truncated = maybeTruncate(response, 5000);
-  console.log("Pushing message to group:", groupId);
-  const sent = await pushMessage(groupId, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
-  console.log("Push result:", sent);
+  await pushMessage(groupId, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
 }
 
 function stripMentions(text, mention) {
