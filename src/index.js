@@ -22,7 +22,7 @@ export default {
           body: JSON.stringify({
             model: env.MODEL || "google/gemini-3.1-pro-preview",
             messages: [{ role: "user", content: prompt }],
-            max_tokens: 8000,
+            max_tokens: 8500,
             temperature: 0.3,
           }),
         });
@@ -64,6 +64,12 @@ export default {
           )
         );
         continue;
+      }
+
+      if (event.type === "message" && event.source?.groupId) {
+        ctx.waitUntil(
+          showLoading("group", event.source.groupId, env.LINE_CHANNEL_ACCESS_TOKEN).catch(() => {})
+        );
       }
 
       ctx.waitUntil(env.EVENT_QUEUE.send(event));
@@ -125,8 +131,6 @@ async function handleEvent(event, env) {
 
   const userText = stripMentions(event.message.text, mention);
 
-  await showLoading(groupId, env.LINE_CHANNEL_ACCESS_TOKEN).catch(() => {});
-
   if (/^(reset|เริ่มใหม่)$/i.test(userText.trim())) {
     await pushMessage(groupId, "✅ Ledger cleared! Start tracking a new trip!", env.LINE_CHANNEL_ACCESS_TOKEN);
     return;
@@ -148,7 +152,9 @@ async function handleEvent(event, env) {
   }
 
   const truncated = maybeTruncate(response, 5000);
-  const sent = await pushMessage(groupId, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
+  const debugLine = "\n\n_[via push API]_";
+  const finalMessage = truncated + debugLine;
+  const sent = await pushMessage(groupId, finalMessage, env.LINE_CHANNEL_ACCESS_TOKEN);
   console.log("Push result:", sent);
 }
 

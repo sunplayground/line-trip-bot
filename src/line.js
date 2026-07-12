@@ -29,16 +29,21 @@ export async function replyMessage(replyToken, message, accessToken) {
   return res.ok;
 }
 
-export async function showLoading(to, accessToken) {
+export async function showLoading(chatType, chatId, accessToken) {
   const res = await fetch(`${LINE_API_BASE}/chat/loading/start`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ chat: { type: "group", id: to } }),
+    body: JSON.stringify({
+      chat: { type: chatType, id: chatId },
+      loadingSeconds: 60,
+    }),
   });
-  return res.ok;
+  const ok = res.ok;
+  if (!ok) console.error("showLoading failed:", res.status, await res.text());
+  return ok;
 }
 
 export async function pushMessage(to, message, accessToken) {

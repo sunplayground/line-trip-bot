@@ -16,7 +16,7 @@ export async function chatCompletion(messages, apiKey, model) {
     body: JSON.stringify({
       model,
       messages: fullMessages,
-      max_tokens: 8000,
+      max_tokens: 8500,
       temperature: 0.3,
     }),
   });
