@@ -1,0 +1,12 @@
+name = "line-trip-bot"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[vars]
+MODEL = "google/gemini-3-pro"
+
+[[kv_namespaces]]
+binding = "TRIP_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_KV_PREVIEW_NAMESPACE_ID"
