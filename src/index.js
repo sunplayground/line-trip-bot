@@ -1,4 +1,4 @@
-import { getBotInfo, pushMessage } from "./line.js";
+import { getBotInfo, pushMessage, showLoading } from "./line.js";
 import { chatCompletion } from "./openrouter.js";
 
 export default {
@@ -90,6 +90,8 @@ async function handleEvent(event, env) {
   if (!isMentioned) return;
 
   const userText = stripMentions(event.message.text, mention);
+
+  await showLoading(groupId, env.LINE_CHANNEL_ACCESS_TOKEN);
 
   if (/^(reset|เริ่มใหม่)$/i.test(userText.trim())) {
     await pushMessage(groupId, "✅ Ledger cleared! Start tracking a new trip!", env.LINE_CHANNEL_ACCESS_TOKEN);

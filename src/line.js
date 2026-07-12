@@ -29,6 +29,18 @@ export async function replyMessage(replyToken, message, accessToken) {
   return res.ok;
 }
 
+export async function showLoading(to, accessToken) {
+  const res = await fetch(`${LINE_API_BASE}/chat/loading/start`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ chat: { type: "group", id: to } }),
+  });
+  return res.ok;
+}
+
 export async function pushMessage(to, message, accessToken) {
   const res = await fetch(`${LINE_API_BASE}/message/push`, {
     method: "POST",
