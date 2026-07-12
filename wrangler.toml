@@ -4,5 +4,5 @@ compatibility_date = "2025-01-01"
 workers_dev = true
 
 [vars]
-MODEL = "google/gemini-3-pro"
+MODEL = "google/gemini-3.1-pro-preview"
 

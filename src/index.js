@@ -5,19 +5,45 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    if (request.method === "GET" && url.pathname === "/test") {
+      const results = {};
+      results.hasLineToken = !!env.LINE_CHANNEL_ACCESS_TOKEN;
+      results.hasLineSecret = !!env.LINE_CHANNEL_SECRET;
+      results.hasOpenrouterKey = !!env.OPENROUTER_API_KEY;
+      results.model = env.MODEL || "google/gemini-3.1-pro-preview";
+
+      try {
+        const botInfo = await getBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
+        results.botInfo = botInfo;
+      } catch (err) {
+        results.botInfoError = err.message;
+      }
+
+      return new Response(JSON.stringify(results, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (request.method !== "POST" || url.pathname !== "/webhook") {
       return new Response("Not Found", { status: 404 });
     }
 
     const body = await request.text();
-
     const signature = request.headers.get("X-Line-Signature");
+
+    console.log("Webhook received:", { path: url.pathname, hasSignature: !!signature, bodyLen: body.length });
+
     if (!signature || !(await verifySignature(body, signature, env.LINE_CHANNEL_SECRET))) {
+      console.log("Signature verification failed");
       return new Response("Unauthorized", { status: 401 });
     }
 
+    console.log("Signature verified OK");
+
     const payload = JSON.parse(body);
     const events = payload.events || [];
+    console.log(`Processing ${events.length} event(s)`);
+    console.log("Events:", JSON.stringify(events).substring(0, 1000));
 
     for (const event of events) {
       try {
@@ -32,7 +58,10 @@ export default {
 };
 
 async function verifySignature(body, signature, secret) {
-  if (!secret) return false;
+  if (!secret) {
+    console.log("No secret configured");
+    return false;
+  }
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
@@ -43,21 +72,14 @@ async function verifySignature(body, signature, secret) {
   );
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
   const expected = btoa(String.fromCharCode(...new Uint8Array(sig)));
-  return expected === signature;
-}
-
-async function handleEvents(events, env) {
-  for (const event of events) {
-    try {
-      await handleEvent(event, env);
-    } catch (err) {
-      console.error("Event handling error:", err);
-    }
-  }
+  const match = expected === signature;
+  console.log("Signature compare:", { expected: expected?.substring(0, 10), got: signature?.substring(0, 10), match });
+  return match;
 }
 
 async function handleEvent(event, env) {
   const { type, source } = event;
+  console.log("Handling event:", type, "source:", JSON.stringify(source));
 
   if (type === "join" && source?.groupId) {
     const welcome =
@@ -70,28 +92,46 @@ async function handleEvent(event, env) {
     return;
   }
 
-  if (type !== "message" || event.message?.type !== "text") return;
+  if (type !== "message" || event.message?.type !== "text") {
+    console.log("Skipping event: not a text message");
+    return;
+  }
 
   const groupId = source?.groupId;
-  if (!groupId) return;
+  if (!groupId) {
+    console.log("Skipping: no groupId (not a group chat)");
+    return;
+  }
+
+  console.log("Message text:", event.message.text);
+  console.log("Mention data:", JSON.stringify(event.message.mention));
 
   const mention = event.message.mention;
-  if (!mention?.mentionees?.length) return;
+  if (!mention?.mentionees?.length) {
+    console.log("Skipping: no mentions");
+    return;
+  }
 
   let botInfo;
   try {
     botInfo = await getBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
+    console.log("Bot userId:", botInfo.userId);
   } catch (err) {
     console.error("Failed to get bot info:", err);
     return;
   }
 
+  console.log("Mentionees:", JSON.stringify(mention.mentionees));
   const isMentioned = mention.mentionees.some((m) => m.userId === botInfo.userId);
+  console.log("Is bot mentioned:", isMentioned);
   if (!isMentioned) return;
 
   const userText = stripMentions(event.message.text, mention);
+  console.log("Stripped text:", userText);
 
-  await showLoading(groupId, env.LINE_CHANNEL_ACCESS_TOKEN);
+  await showLoading(groupId, env.LINE_CHANNEL_ACCESS_TOKEN).catch((e) =>
+    console.log("showLoading failed (non-fatal):", e.message)
+  );
 
   if (/^(reset|เริ่มใหม่)$/i.test(userText.trim())) {
     await pushMessage(groupId, "✅ Ledger cleared! Start tracking a new trip!", env.LINE_CHANNEL_ACCESS_TOKEN);
@@ -100,11 +140,13 @@ async function handleEvent(event, env) {
 
   let response;
   try {
+    console.log("Calling OpenRouter...");
     response = await chatCompletion(
       [{ role: "user", content: userText }],
       env.OPENROUTER_API_KEY,
-      env.MODEL || "google/gemini-3-pro"
+      env.MODEL || "google/gemini-3.1-pro-preview"
     );
+    console.log("OpenRouter response:", response?.substring(0, 200));
   } catch (err) {
     console.error("LLM call failed:", err);
     response =
@@ -112,7 +154,9 @@ async function handleEvent(event, env) {
   }
 
   const truncated = maybeTruncate(response, 5000);
-  await pushMessage(groupId, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
+  console.log("Pushing message to group:", groupId);
+  const sent = await pushMessage(groupId, truncated, env.LINE_CHANNEL_ACCESS_TOKEN);
+  console.log("Push result:", sent);
 }
 
 function stripMentions(text, mention) {
