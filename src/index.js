@@ -149,6 +149,9 @@ async function handleEvent(event, env) {
   const mention = event.message.mention;
   if (!mention?.mentionees?.length) return;
 
+  const mentionees = mention.mentionees.filter((m) => m.userId !== "@all");
+  if (!mentionees.length) return;
+
   let botInfo;
   try {
     botInfo = await getBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
@@ -157,7 +160,7 @@ async function handleEvent(event, env) {
     return;
   }
 
-  const isMentioned = mention.mentionees.some((m) => m.userId === botInfo.userId);
+  const isMentioned = mentionees.some((m) => m.userId === botInfo.userId);
   if (!isMentioned) return;
 
   const userText = stripMentions(event.message.text, mention);
