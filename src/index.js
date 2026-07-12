@@ -1,9 +1,6 @@
 import { getBotInfo, replyMessage, pushMessage } from "./line.js";
 import { chatCompletion } from "./openrouter.js";
 
-const MAX_HISTORY = 30;
-const KV_TTL = 2592000;
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -89,7 +86,6 @@ async function handleEvent(event, env) {
   const userText = stripMentions(event.message.text, mention);
 
   if (/^(reset|เริ่มใหม่)$/i.test(userText.trim())) {
-    await saveHistory(env, groupId, []);
     await replyWithFallback(
       event.replyToken,
       groupId,
@@ -99,15 +95,10 @@ async function handleEvent(event, env) {
     return;
   }
 
-  const history = await loadHistory(env, groupId);
-
-  history.push({ role: "user", content: userText });
-  const trimmed = history.slice(-MAX_HISTORY);
-
   let response;
   try {
     response = await chatCompletion(
-      trimmed,
+      [{ role: "user", content: userText }],
       env.OPENROUTER_API_KEY,
       env.MODEL || "google/gemini-3-pro"
     );
@@ -117,32 +108,8 @@ async function handleEvent(event, env) {
       "เกิดข้อผิดพลาด ลองอีกครั้งนะ / Sorry, I had trouble processing that. Please try again.";
   }
 
-  history.push({ role: "assistant", content: response });
-  await saveHistory(env, groupId, history.slice(-MAX_HISTORY));
-
   const truncated = maybeTruncate(response, 5000);
   await replyWithFallback(event.replyToken, groupId, truncated, env);
-}
-
-async function loadHistory(env, groupId) {
-  if (!env.TRIP_KV) return [];
-  try {
-    const stored = await env.TRIP_KV.get(`group:${groupId}:conv`, "json");
-    return Array.isArray(stored) ? stored : [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveHistory(env, groupId, history) {
-  if (!env.TRIP_KV) return;
-  try {
-    await env.TRIP_KV.put(`group:${groupId}:conv`, JSON.stringify(history), {
-      expirationTtl: KV_TTL,
-    });
-  } catch (err) {
-    console.error("KV save failed:", err);
-  }
 }
 
 async function replyWithFallback(replyToken, groupId, message, env) {
