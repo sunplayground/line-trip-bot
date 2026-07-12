@@ -178,6 +178,11 @@ async function handleEvent(event, env) {
 
   const userText = stripMentions(event.message.text, mention);
 
+  if (/จุดอ่อน/.test(userText)) {
+    await pushMessage(groupId, "Thep", env.LINE_CHANNEL_ACCESS_TOKEN);
+    return;
+  }
+
   if (/^groupid$/i.test(userText.trim())) {
     await pushMessage(groupId, `Group ID: ${groupId}`, env.LINE_CHANNEL_ACCESS_TOKEN);
     return;
