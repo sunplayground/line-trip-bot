@@ -5,6 +5,35 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    if (request.method === "GET" && url.pathname === "/test-loading") {
+      const groupId = url.searchParams.get("groupId");
+      const results = {};
+      if (groupId) {
+        try {
+          const res = await fetch("https://api.line.me/v2/bot/chat/loading/start", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              chat: { type: "group", id: groupId },
+              loadingSeconds: 60,
+            }),
+          });
+          results.status = res.status;
+          results.body = await res.text();
+        } catch (err) {
+          results.error = err.message;
+        }
+      } else {
+        results.error = "Add ?groupId=YOUR_GROUP_ID to test";
+      }
+      return new Response(JSON.stringify(results, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (request.method === "GET" && url.pathname === "/test") {
       const prompt = url.searchParams.get("q") || "Say hello in 50 words";
       const results = {};
@@ -22,7 +51,7 @@ export default {
           body: JSON.stringify({
             model: env.MODEL || "google/gemini-3.1-pro-preview",
             messages: [{ role: "user", content: prompt }],
-            max_tokens: 8500,
+            max_tokens: 10000,
             temperature: 0.3,
           }),
         });
@@ -68,7 +97,9 @@ export default {
 
       if (event.type === "message" && event.source?.groupId) {
         ctx.waitUntil(
-          showLoading("group", event.source.groupId, env.LINE_CHANNEL_ACCESS_TOKEN).catch(() => {})
+          showLoading("group", event.source.groupId, env.LINE_CHANNEL_ACCESS_TOKEN)
+            .then((ok) => console.log("showLoading result:", ok))
+            .catch((e) => console.error("showLoading error:", e.message))
         );
       }
 
