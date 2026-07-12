@@ -46,6 +46,14 @@ export async function showLoading(chatType, chatId, accessToken) {
   return ok;
 }
 
+export async function leaveGroup(groupId, accessToken) {
+  const res = await fetch(`${LINE_API_BASE}/group/${groupId}/leave`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return res.ok;
+}
+
 export async function pushMessage(to, message, accessToken) {
   const res = await fetch(`${LINE_API_BASE}/message/push`, {
     method: "POST",

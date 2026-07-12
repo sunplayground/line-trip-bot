@@ -1,4 +1,4 @@
-import { getBotInfo, pushMessage, replyMessage, showLoading } from "./line.js";
+import { getBotInfo, pushMessage, replyMessage, showLoading, leaveGroup } from "./line.js";
 import { chatCompletion } from "./openrouter.js";
 
 export default {
@@ -83,11 +83,18 @@ export default {
     const payload = JSON.parse(body);
     const events = payload.events || [];
 
-    for (const event of events) {
-      if (event.type === "join" && event.source?.groupId) {
+for (const event of events) {
+      if (event.type === "join" && event?.source?.groupId) {
+        const gid = event.source.groupId;
+        const allowed = (env.ALLOWED_GROUP_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
+        if (allowed.length && !allowed.includes(gid)) {
+          console.log(`Auto-leaving unauthorized group: ${gid}`);
+          ctx.waitUntil(leaveGroup(gid, env.LINE_CHANNEL_ACCESS_TOKEN));
+          continue;
+        }
         ctx.waitUntil(
           pushMessage(
-            event.source.groupId,
+            gid,
             "👋 Hi! I'm TripSplit Bot.\n\nTag me to track trip expenses!",
             env.LINE_CHANNEL_ACCESS_TOKEN
           )
@@ -146,6 +153,12 @@ async function handleEvent(event, env) {
   const groupId = source?.groupId;
   if (!groupId) return;
 
+  const allowed = (env.ALLOWED_GROUP_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (allowed.length && !allowed.includes(groupId)) {
+    console.log(`Blocked message from unauthorized group: ${groupId}`);
+    return;
+  }
+
   const mention = event.message.mention;
   if (!mention?.mentionees?.length) return;
 
@@ -164,6 +177,11 @@ async function handleEvent(event, env) {
   if (!isMentioned) return;
 
   const userText = stripMentions(event.message.text, mention);
+
+  if (/^groupid$/i.test(userText.trim())) {
+    await pushMessage(groupId, `Group ID: ${groupId}`, env.LINE_CHANNEL_ACCESS_TOKEN);
+    return;
+  }
 
   if (/^(reset|เริ่มใหม่)$/i.test(userText.trim())) {
     await pushMessage(groupId, "✅ Ledger cleared! Start tracking a new trip!", env.LINE_CHANNEL_ACCESS_TOKEN);

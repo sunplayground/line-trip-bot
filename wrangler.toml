@@ -5,6 +5,7 @@ workers_dev = true
 
 [vars]
 MODEL = "google/gemini-3.1-pro-preview"
+ALLOWED_GROUP_IDS = ""
 
 [[queues.producers]]
 queue = "line-trip-events"
