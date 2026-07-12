@@ -6,17 +6,36 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/test") {
+      const prompt = url.searchParams.get("q") || "Say hello in 50 words";
       const results = {};
-      results.hasLineToken = !!env.LINE_CHANNEL_ACCESS_TOKEN;
-      results.hasLineSecret = !!env.LINE_CHANNEL_SECRET;
-      results.hasOpenrouterKey = !!env.OPENROUTER_API_KEY;
       results.model = env.MODEL || "google/gemini-3.1-pro-preview";
 
       try {
-        const botInfo = await getBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
-        results.botInfo = botInfo;
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://line-trip-bot.workers.dev",
+            "X-Title": "LINE Trip Bot",
+          },
+          body: JSON.stringify({
+            model: env.MODEL || "google/gemini-3.1-pro-preview",
+            messages: [
+              { role: "user", content: prompt },
+            ],
+            max_tokens: 4000,
+            temperature: 0.7,
+          }),
+        });
+        results.status = res.status;
+        const data = await res.json();
+        results.finish_reason = data.choices?.[0]?.finish_reason;
+        results.usage = data.usage;
+        results.content = data.choices?.[0]?.message?.content;
+        results.reasoning = data.choices?.[0]?.message?.reasoning;
       } catch (err) {
-        results.botInfoError = err.message;
+        results.error = err.message;
       }
 
       return new Response(JSON.stringify(results, null, 2), {
@@ -46,11 +65,7 @@ export default {
     console.log("Events:", JSON.stringify(events).substring(0, 1000));
 
     for (const event of events) {
-      try {
-        await handleEvent(event, env);
-      } catch (err) {
-        console.error("Event handling error:", err);
-      }
+      ctx.waitUntil(handleEvent(event, env).catch((err) => console.error("Event handling error:", err)));
     }
 
     return new Response("OK", { status: 200 });
